@@ -1,0 +1,7 @@
+// static/script.js
+
+// JavaScript code for your functionality
+document.addEventListener("DOMContentLoaded", function () {
+    // Your JavaScript code here
+    console.log("Script loaded!");
+});

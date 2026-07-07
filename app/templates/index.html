@@ -1,0 +1,82 @@
+<!-- templates/index.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Celebrity Look-alike App</title>
+</head>
+
+<body>
+    <h1>Celebrity Look-alike App</h1>
+    <video id="video" width="640" height="480" autoplay></video>
+    <button id="startCapture">Start Capture</button>
+    <button id="stopCapture">Stop Capture</button>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <div id="results"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startCaptureBtn = document.getElementById('startCapture');
+        const stopCaptureBtn = document.getElementById('stopCapture');
+        const resultsDiv = document.getElementById('results');
+
+        let captureInProgress = false;
+
+        startCaptureBtn.addEventListener('click', () => {
+            captureInProgress = true;
+            startCapture();
+        });
+
+        stopCaptureBtn.addEventListener('click', () => {
+            captureInProgress = false;
+        });
+
+        async function startCapture() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+            video.srcObject = stream;
+
+            const canvasContext = canvas.getContext('2d');
+
+            function captureFrame() {
+                if (captureInProgress) {
+                    canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                    // Get the image data as a Uint8Array (binary buffer)
+                    canvas.toBlob(blob => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const imageData = new Uint8Array(reader.result);
+                            // Send the frame data to the server
+                            fetch('/process_frame', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ frame: imageData }),
+                            })
+                                .then(response => response.json())
+                                .then(data => {
+                                    resultsDiv.innerHTML = `Look-alike: ${data.look_alike}`;
+                                    captureFrame();
+                                })
+                                .catch(error => console.error('Error:', error));
+                        };
+                        reader.readAsArrayBuffer(blob);
+                    }, 'image/jpeg');
+                } else {
+                    stream.getTracks().forEach(track => track.stop());
+                    video.srcObject = null;
+                }
+            }
+
+            captureFrame();
+        }
+
+    </script>
+</body>
+
+</html>

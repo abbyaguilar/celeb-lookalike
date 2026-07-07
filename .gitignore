@@ -1,0 +1,14 @@
+# Datasets
+celebrities_dataset/
+processed_dataset/
+
+# Trained models
+face_recognition_models/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment
+.env
