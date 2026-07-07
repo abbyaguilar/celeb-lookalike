@@ -149,7 +149,7 @@ These files can be recreated by running the preprocessing and training scripts l
 Clone the repository:
 
 ```bash
-git clone <repository-url>
+git clone [<repository-url>](https://github.com/abbyaguilar/celeb-lookalike.git)
 ```
 
 Navigate into the project directory:
