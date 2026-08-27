@@ -4,83 +4,294 @@ import joblib
 import numpy as np
 import tkinter as tk
 from PIL import Image, ImageTk
+from collections import Counter
 
-def load_model(model_path="face_recognition_model.pkl", label_encoder_path="label_encoder.pkl"):
-    classifier = joblib.load(model_path)
-    label_encoder = joblib.load(label_encoder_path)
+
+MODEL_PATH = "face_recognition_model.pkl"
+LABEL_ENCODER_PATH = "label_encoder.pkl"
+
+# How many frames to analyze before updating the result
+ANALYSIS_FRAMES = 20
+
+# Number of recent results to keep for stability
+HISTORY_SIZE = 40
+
+
+def load_model():
+    classifier = joblib.load(MODEL_PATH)
+    label_encoder = joblib.load(LABEL_ENCODER_PATH)
     return classifier, label_encoder
 
-def detect_face_and_match(frame, classifier, label_encoder, label_var):
-    # Find all face locations in the frame
-    face_locations = face_recognition.face_locations(frame)
 
-    # If faces are found, draw rectangles around them and try to recognize
-    for (top, right, bottom, left) in face_locations:
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+def pretty_name(name):
+    """Convert Cierra_Ramirez -> Cierra Ramirez."""
+    return name.replace("_", " ")
 
-        # Extract face encoding for recognition
-        face_encoding = face_recognition.face_encodings(frame, [(top, right, bottom, left)])
 
-        if face_encoding:
-            # Predict the label and confidence
-            predictions = classifier.predict_proba(face_encoding)
-            best_match_index = np.argmax(predictions, axis=1)
-            confidence = predictions[np.arange(len(best_match_index)), best_match_index][0]  # Get the first element
+class CelebrityLookalikeApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Celebrity Lookalike")
+        self.root.geometry("900x760")
+        self.root.configure(bg="#111111")
 
-            # Print recognized labels for debugging
-            recognized_labels = label_encoder.inverse_transform(best_match_index)
-            print(f"Recognized Labels: {recognized_labels} (Confidence: {confidence:.2f})")
+        self.classifier, self.label_encoder = load_model()
 
-            # Display the recognized label on the frame
-            if confidence > 0.10:  # Adjust confidence threshold as needed
-                label_text = f"We are confident you look most like {recognized_labels[0]} ({confidence:.2f})"
-                cv2.putText(frame, label_text, (left, bottom + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        self.prediction_history = []
+        self.frame_count = 0
+        self.current_result = None
+        self.running = True
 
-    return frame
+        # -----------------------------
+        # Title
+        # -----------------------------
+        title = tk.Label(
+            root,
+            text="✨ Celebrity Lookalike",
+            font=("Helvetica", 26, "bold"),
+            fg="white",
+            bg="#111111"
+        )
+        title.pack(pady=(20, 5))
+
+        subtitle = tk.Label(
+            root,
+            text="Look into the camera to discover your closest celebrity match",
+            font=("Helvetica", 11),
+            fg="#bbbbbb",
+            bg="#111111"
+        )
+        subtitle.pack(pady=(0, 15))
+
+        # -----------------------------
+        # Camera
+        # -----------------------------
+        self.camera_label = tk.Label(
+            root,
+            bg="#222222",
+            bd=0
+        )
+        self.camera_label.pack()
+
+        # -----------------------------
+        # Result section
+        # -----------------------------
+        self.status_label = tk.Label(
+            root,
+            text="Analyzing your face...",
+            font=("Helvetica", 12),
+            fg="#bbbbbb",
+            bg="#111111"
+        )
+        self.status_label.pack(pady=(15, 5))
+
+        self.result_label = tk.Label(
+            root,
+            text="",
+            font=("Helvetica", 24, "bold"),
+            fg="white",
+            bg="#111111"
+        )
+        self.result_label.pack()
+
+        self.score_label = tk.Label(
+            root,
+            text="",
+            font=("Helvetica", 13),
+            fg="#cccccc",
+            bg="#111111"
+        )
+        self.score_label.pack(pady=(5, 15))
+
+        # -----------------------------
+        # Quit button
+        # -----------------------------
+        quit_button = tk.Button(
+            root,
+            text="Quit",
+            command=self.close,
+            font=("Helvetica", 11),
+            padx=25,
+            pady=8
+        )
+        quit_button.pack(pady=(0, 20))
+
+        # -----------------------------
+        # Camera
+        # -----------------------------
+        self.cap = cv2.VideoCapture(0)
+
+        if not self.cap.isOpened():
+            self.status_label.config(
+                text="Unable to access your camera."
+            )
+            return
+
+        self.update_frame()
+
+    def analyze_frame(self, frame):
+        """Detect faces and return the predicted celebrity."""
+
+        face_locations = face_recognition.face_locations(frame)
+
+        if not face_locations:
+            return frame, None
+
+        for (top, right, bottom, left) in face_locations:
+
+            # Draw face box
+            cv2.rectangle(
+                frame,
+                (left, top),
+                (right, bottom),
+                (255, 255, 255),
+                2
+            )
+
+            # Get face encoding
+            encodings = face_recognition.face_encodings(
+                frame,
+                [(top, right, bottom, left)]
+            )
+
+            if not encodings:
+                continue
+
+            face_encoding = encodings[0]
+
+            try:
+                predictions = self.classifier.predict_proba(
+                    [face_encoding]
+                )
+
+                best_index = int(np.argmax(predictions[0]))
+
+                predicted_label = self.label_encoder.inverse_transform(
+                    [best_index]
+                )[0]
+
+                return frame, predicted_label
+
+            except Exception:
+                return frame, None
+
+        return frame, None
+
+    def calculate_result(self):
+        """Determine the most consistent celebrity prediction."""
+
+        if not self.prediction_history:
+            return None, 0
+
+        counts = Counter(self.prediction_history)
+
+        winner, winner_count = counts.most_common(1)[0]
+
+        total = len(self.prediction_history)
+
+        consistency = (winner_count / total) * 100
+
+        return winner, consistency
+
+    def update_result(self):
+        """Update the UI with a stable result."""
+
+        if len(self.prediction_history) < ANALYSIS_FRAMES:
+            progress = int(
+                (len(self.prediction_history) / ANALYSIS_FRAMES) * 100
+            )
+
+            self.status_label.config(
+                text=f"Analyzing your features... {progress}%"
+            )
+
+            return
+
+        winner, score = self.calculate_result()
+
+        if winner:
+
+            formatted_name = pretty_name(winner)
+
+            self.current_result = winner
+
+            self.status_label.config(
+                text="✨ Your closest celebrity match"
+            )
+
+            self.result_label.config(
+                text=formatted_name
+            )
+
+            self.score_label.config(
+                text=f"Match consistency: {score:.0f}%"
+            )
+
+    def update_frame(self):
+        if not self.running:
+            return
+
+        ret, frame = self.cap.read()
+
+        if not ret:
+            self.status_label.config(
+                text="Unable to read from camera."
+            )
+            return
+
+        # Mirror the camera like a normal selfie camera
+        frame = cv2.flip(frame, 1)
+
+        frame_result, prediction = self.analyze_frame(frame)
+
+        if prediction:
+            self.prediction_history.append(prediction)
+
+            # Keep history from growing forever
+            if len(self.prediction_history) > HISTORY_SIZE:
+                self.prediction_history.pop(0)
+
+        self.frame_count += 1
+
+        # Update result periodically rather than every frame
+        if self.frame_count % 5 == 0:
+            self.update_result()
+
+        # Convert OpenCV image to Tkinter image
+        frame_rgb = cv2.cvtColor(
+            frame_result,
+            cv2.COLOR_BGR2RGB
+        )
+
+        image = Image.fromarray(frame_rgb)
+
+        # Resize camera display
+        image.thumbnail((850, 600))
+
+        imgtk = ImageTk.PhotoImage(image=image)
+
+        self.camera_label.imgtk = imgtk
+        self.camera_label.configure(image=imgtk)
+
+        # Schedule next frame
+        self.root.after(15, self.update_frame)
+
+    def close(self):
+        self.running = False
+
+        if self.cap:
+            self.cap.release()
+
+        self.root.destroy()
+
 
 def main():
-    classifier, label_encoder = load_model()
-
-    # Create the main window
     root = tk.Tk()
-    root.title("Face Recognition")
 
-    # Create a label variable to update the displayed text
-    label_var = tk.StringVar()
-    label_var.set("Look into the camera...")
-    label = tk.Label(root, textvariable=label_var, font=("Helvetica", 12))
-    label.pack(pady=10)
+    app = CelebrityLookalikeApp(root)
 
-    # Open a connection to the webcam (you may need to adjust the index)
-    cap = cv2.VideoCapture(0)
+    root.mainloop()
 
-    while True:
-        # Capture frame-by-frame
-        ret, frame = cap.read()
-
-        # Perform face detection and recognition
-        frame_result = detect_face_and_match(frame, classifier, label_encoder, label_var)
-
-        # Convert the frame to RGB format for display in tkinter
-        frame_rgb = cv2.cvtColor(frame_result, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb)
-        imgtk = ImageTk.PhotoImage(image=img)
-
-        # Update the label with the recognized celebrity
-        label.imgtk = imgtk
-        label.configure(image=imgtk)
-
-        # Update the tkinter window
-        root.update()
-
-        # Break the loop if 'q' key is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    # Release the webcam and close all windows
-    cap.release()
-    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
-    tk.mainloop()

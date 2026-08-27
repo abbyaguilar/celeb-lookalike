@@ -203,7 +203,7 @@ This processes the image collection and prepares facial data for training.
 Train the look-alike model:
 
 ```bash
-python train_model.py
+python train_face_recognition_model.py
 ```
 
 This creates the trained model used for facial similarity comparisons.
